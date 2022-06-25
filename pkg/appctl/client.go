@@ -230,6 +230,44 @@ func LoadClientConfig() (*pb.ClientConfig, error) {
 	return c, nil
 }
 
+// LoadClientJSONConfig reads json client config from disk.
+func LoadClientJSONConfig() (*pb.ClientConfig, error) {
+	clientIOLock.Lock()
+	defer clientIOLock.Unlock()
+
+	fileName, err := clientJSONConfigFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("clientConfigFilePath() failed: %w", err)
+	}
+	if err := prepareClientConfigDir(); err != nil {
+		return nil, fmt.Errorf("prepareClientConfigDir() failed: %w", err)
+	}
+
+	if log.IsLevelEnabled(log.DebugLevel) {
+		log.Debugf("loading client config from %q", fileName)
+	}
+	f, err := os.Open(fileName)
+	if err != nil && os.IsNotExist(err) {
+		return nil, stderror.ErrFileNotExist
+	} else if err != nil {
+		return nil, fmt.Errorf("os.Open() failed: %w", err)
+	}
+	defer f.Close()
+
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("io.ReadAll() failed: %w", err)
+	}
+
+	c := &pb.ClientConfig{}
+	err = jsonUnmarshalOption.Unmarshal(b, c)
+	if err != nil {
+		return nil, fmt.Errorf("protojson.Unmarshal() failed: %w", err)
+	}
+
+	return c, nil
+}
+
 // StoreClientConfig writes client config to disk.
 func StoreClientConfig(config *pb.ClientConfig) error {
 	clientIOLock.Lock()
@@ -460,6 +498,24 @@ func clientConfigFilePath() (string, error) {
 		return "", fmt.Errorf("prepareClientConfigDir() failed: %w", err)
 	}
 	cachedClientConfigFilePath = cachedClientConfigDir + string(os.PathSeparator) + "client.conf.pb"
+	return cachedClientConfigFilePath, nil
+}
+
+func clientJSONConfigFilePath() (string, error) {
+	if cachedClientConfigFilePath != "" {
+		return cachedClientConfigFilePath, nil
+	}
+
+	if v, found := os.LookupEnv("MIERU_CONFIG_FILE"); found {
+		cachedClientConfigFilePath = v
+		cachedClientConfigDir = filepath.Dir(v)
+		return cachedClientConfigFilePath, nil
+	}
+
+	if err := prepareClientConfigDir(); err != nil {
+		return "", fmt.Errorf("prepareClientConfigDir() failed: %w", err)
+	}
+	cachedClientConfigFilePath = cachedClientConfigDir + string(os.PathSeparator) + "client.json"
 	return cachedClientConfigFilePath, nil
 }
 
